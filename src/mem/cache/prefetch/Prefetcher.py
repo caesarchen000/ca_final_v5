@@ -174,7 +174,7 @@ class GHBPrefetcher(QueuedPrefetcher):
     pattern_length = Param.Unsigned(
         20, "Number of historical deltas tracked for pattern matching"
     )
-    degree = Param.Unsigned(6, "Prefetch degree per miss")
+    degree = Param.Unsigned(7, "Prefetch degree per miss")
     use_pc = Param.Bool(True, "Track history per-PC when available")
     confidence_threshold = Param.Percent(
         50, "Minimum percentage for delta correlation confidence"

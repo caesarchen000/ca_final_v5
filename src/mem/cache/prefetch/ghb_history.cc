@@ -295,29 +295,32 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
     // This helps with early learning phase and improves coverage
     if (predicted.empty() && !candidates.empty()) {
         unsigned top_confidence = (candidates[0].second.first * 100) / candidates[0].second.second;
-        // Use top candidate if it has at least 20% confidence (more aggressive for better coverage)
+        // Use top candidate if it has at least 19% confidence (more aggressive for better coverage)
         // Also use if we have multiple candidates with similar confidence
-        if (top_confidence >= 20) {
+        if (top_confidence >= 19) {
             predicted.push_back(candidates[0].first);
             // If top confidence is reasonable, also add second candidate if it's close
-            if (candidates.size() > 1 && top_confidence >= 30) {
+            if (candidates.size() > 1 && top_confidence >= 28) {
                 unsigned second_confidence = (candidates[1].second.first * 100) / candidates[1].second.second;
-                if (second_confidence >= 20 && second_confidence >= top_confidence - 10) {
+                if (second_confidence >= 19 && second_confidence >= top_confidence - 10) {
                     predicted.push_back(candidates[1].first);
                 }
             }
         }
     }
     
-    // If we have very high confidence (>60%), add additional predictions if available
+    // If we have very high confidence (>58%), add additional predictions if available
     // This helps with complex patterns that have multiple likely next steps
-    if (max_confidence > 60 && predicted.size() < num_to_return && candidates.size() > predicted.size()) {
+    // Be more aggressive: lower the threshold for adding secondary predictions
+    if (max_confidence > 58 && predicted.size() < num_to_return && candidates.size() > predicted.size()) {
         for (size_t i = predicted.size(); i < candidates.size() && predicted.size() < num_to_return; ++i) {
             unsigned conf = (candidates[i].second.first * 100) / candidates[i].second.second;
             // For high-confidence patterns, also accept medium-confidence secondary predictions
             // Be more aggressive: lower threshold for secondary predictions
-            unsigned secondary_threshold = max_confidence > 80 ? (confidenceThreshold - 15) : 
-                                          (max_confidence > 70 ? (confidenceThreshold - 10) : confidenceThreshold);
+            unsigned secondary_threshold = max_confidence > 80 ? (confidenceThreshold - 16) : 
+                                          (max_confidence > 70 ? (confidenceThreshold - 11) : 
+                                          (max_confidence > 60 ? (confidenceThreshold - 8) : 
+                                          (max_confidence > 58 ? (confidenceThreshold - 6) : confidenceThreshold)));
             if (conf >= secondary_threshold) {
                 // Check if already in predicted
                 bool already_added = false;

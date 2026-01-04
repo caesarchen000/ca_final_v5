@@ -85,7 +85,7 @@ GHBPrefetcher::calculatePrefetch(
     // Also be more aggressive for regular patterns (single consistent delta)
     if (hasMatch) {
         if (predicted.size() >= 2) {
-            target_degree = degree + 9;  // Increase effective degree for high-confidence patterns
+            target_degree = degree + 8;  // Increase effective degree for high-confidence patterns
         } else if (predicted.size() == 1 && chronological.size() >= 3) {
             // Check if pattern is very regular (same delta repeated)
             bool is_regular = true;
@@ -99,7 +99,7 @@ GHBPrefetcher::calculatePrefetch(
                 if (i == 0) break;
             }
             if (is_regular) {
-                target_degree = degree + 11;  // Very aggressive for regular stride patterns
+                target_degree = degree + 10;  // Very aggressive for regular stride patterns
             } else {
                 // Even for irregular patterns, be more aggressive if we have a match
                 target_degree = degree + 4;
@@ -150,7 +150,7 @@ GHBPrefetcher::calculatePrefetch(
             // Chain up to target_degree prefetches using the primary delta
             // This is especially effective for stride-like patterns
             // Be more aggressive: chain even for fallback if the delta is consistent
-            unsigned max_chain = hasMatch ? (target_degree * 5 + target_degree / 2) : degree * 2;  // Chain more for high-confidence
+            unsigned max_chain = hasMatch ? target_degree * 5 : degree * 2;  // Chain more for high-confidence
             while (prefetches_generated < target_degree) {
                 chain_addr = static_cast<Addr>(
                     static_cast<int64_t>(chain_addr) + primary_delta);
