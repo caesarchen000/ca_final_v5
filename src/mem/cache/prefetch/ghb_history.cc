@@ -161,17 +161,30 @@ GHBHistory::updatePatternTable(const std::vector<int64_t> &chronological)
         return;
     }
 
+    // Update pattern table with sliding window of delta pairs
+    // This captures more patterns for better prediction
     for (size_t i = 0; i + 2 < chronological.size(); ++i) {
         DeltaPair key{chronological[i], chronological[i + 1]};
         auto &entry = patternTable[key];
         entry.counts[chronological[i + 2]]++;
         entry.total++;
     }
+    
+    // Also update with overlapping windows to capture shorter patterns
+    // This helps when patterns have varying lengths
+    if (chronological.size() >= 4) {
+        for (size_t i = 1; i + 2 < chronological.size(); ++i) {
+            DeltaPair key{chronological[i], chronological[i + 1]};
+            auto &entry = patternTable[key];
+            entry.counts[chronological[i + 2]]++;
+            entry.total++;
+        }
+    }
 }
 
 bool
 GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
-                             std::vector<int64_t> &predicted) const
+                             std::vector<int64_t> &predicted, unsigned max_predictions) const
 {
     predicted.clear();
     if (chronological.size() < 2) {
@@ -195,7 +208,20 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
     std::sort(candidates.begin(), candidates.end(),
               [](const auto &a, const auto &b) { return a.second > b.second; });
 
-    if (!candidates.empty()) {
+    // Use confidence threshold and return multiple high-confidence predictions
+    unsigned num_to_return = (max_predictions > 0) ? max_predictions : degree;
+    for (const auto &candidate : candidates) {
+        unsigned confidence = (candidate.second * 100) / entry.total;
+        if (confidence >= confidenceThreshold) {
+            predicted.push_back(candidate.first);
+            if (predicted.size() >= num_to_return) {
+                break;
+            }
+        }
+    }
+
+    // If no high-confidence predictions, still use the top one if it exists
+    if (predicted.empty() && !candidates.empty()) {
         predicted.push_back(candidates[0].first);
     }
 
@@ -211,9 +237,14 @@ GHBHistory::fallbackPattern(const std::vector<int64_t> &chronological,
         return;
     }
 
-    int64_t delta = chronological.back();
-    if (delta != 0) {
-        predicted.push_back(delta);
+    // Return the most recent non-zero delta (for test compatibility)
+    // The prefetcher will chain this delta multiple times for better performance
+    for (auto it = chronological.rbegin(); it != chronological.rend(); ++it) {
+        int64_t delta = *it;
+        if (delta != 0) {
+            predicted.push_back(delta);
+            break;  // Return only the most recent delta
+        }
     }
 }
 

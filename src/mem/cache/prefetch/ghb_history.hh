@@ -47,7 +47,7 @@ class GHBHistory
                       std::vector<int64_t> &deltas) const;
     void updatePatternTable(const std::vector<int64_t> &chronological);
     bool findPatternMatch(const std::vector<int64_t> &chronological,
-                          std::vector<int64_t> &predicted) const;
+                          std::vector<int64_t> &predicted, unsigned max_predictions = 0) const;
     void fallbackPattern(const std::vector<int64_t> &chronological,
                          std::vector<int64_t> &predicted) const;
 
