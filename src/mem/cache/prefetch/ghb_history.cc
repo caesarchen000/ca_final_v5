@@ -172,12 +172,27 @@ GHBHistory::updatePatternTable(const std::vector<int64_t> &chronological)
     
     // Also update with overlapping windows to capture shorter patterns
     // This helps when patterns have varying lengths
-    if (chronological.size() >= 4) {
-        for (size_t i = 1; i + 2 < chronological.size(); ++i) {
+    // Use multiple overlapping windows for better pattern coverage
+    // Be more aggressive: update with all possible overlapping windows
+    for (size_t offset = 1; offset < chronological.size() - 2 && offset < 4; ++offset) {
+        for (size_t i = offset; i + 2 < chronological.size(); ++i) {
             DeltaPair key{chronological[i], chronological[i + 1]};
             auto &entry = patternTable[key];
             entry.counts[chronological[i + 2]]++;
             entry.total++;
+        }
+    }
+    
+    // Also capture reverse patterns (for irregular access patterns)
+    // This helps with patterns that go backwards
+    if (chronological.size() >= 4) {
+        for (size_t i = chronological.size() - 3; i + 2 < chronological.size() && i < chronological.size(); --i) {
+            if (i >= chronological.size()) break;  // Prevent underflow
+            DeltaPair key{chronological[i], chronological[i + 1]};
+            auto &entry = patternTable[key];
+            entry.counts[chronological[i + 2]]++;
+            entry.total++;
+            if (i == 0) break;
         }
     }
 }
@@ -208,10 +223,16 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
     std::sort(candidates.begin(), candidates.end(),
               [](const auto &a, const auto &b) { return a.second > b.second; });
 
-    // Use confidence threshold and return multiple high-confidence predictions
+    // Use confidence threshold - collect multiple high-confidence predictions
     unsigned num_to_return = (max_predictions > 0) ? max_predictions : degree;
+    
+    // Collect high-confidence predictions (strict threshold)
+    unsigned max_confidence = 0;
     for (const auto &candidate : candidates) {
         unsigned confidence = (candidate.second * 100) / entry.total;
+        if (confidence > max_confidence) {
+            max_confidence = confidence;
+        }
         if (confidence >= confidenceThreshold) {
             predicted.push_back(candidate.first);
             if (predicted.size() >= num_to_return) {
@@ -220,9 +241,39 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
         }
     }
 
-    // If no high-confidence predictions, still use the top one if it exists
+    // If no high-confidence predictions but we have candidates, use top one if it's reasonable
+    // This helps with early learning phase and improves coverage
     if (predicted.empty() && !candidates.empty()) {
-        predicted.push_back(candidates[0].first);
+        unsigned top_confidence = (candidates[0].second * 100) / entry.total;
+        // Use top candidate if it has at least 25% confidence (reasonable for early learning)
+        if (top_confidence >= 25) {
+            predicted.push_back(candidates[0].first);
+        }
+    }
+    
+    // If we have very high confidence (>60%), add additional predictions if available
+    // This helps with complex patterns that have multiple likely next steps
+    if (max_confidence > 60 && predicted.size() < num_to_return && candidates.size() > predicted.size()) {
+        for (size_t i = predicted.size(); i < candidates.size() && predicted.size() < num_to_return; ++i) {
+            unsigned conf = (candidates[i].second * 100) / entry.total;
+            // For high-confidence patterns, also accept medium-confidence secondary predictions
+            // Be more aggressive: lower threshold for secondary predictions
+            unsigned secondary_threshold = max_confidence > 80 ? (confidenceThreshold - 15) : 
+                                          (max_confidence > 70 ? (confidenceThreshold - 10) : confidenceThreshold);
+            if (conf >= secondary_threshold) {
+                // Check if already in predicted
+                bool already_added = false;
+                for (int64_t p : predicted) {
+                    if (p == candidates[i].first) {
+                        already_added = true;
+                        break;
+                    }
+                }
+                if (!already_added) {
+                    predicted.push_back(candidates[i].first);
+                }
+            }
+        }
     }
 
     return !predicted.empty();
