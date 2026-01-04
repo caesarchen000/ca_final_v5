@@ -170,14 +170,14 @@ class GHBPrefetcher(QueuedPrefetcher):
     cxx_class = "gem5::prefetch::GHBPrefetcher"
     cxx_header = "mem/cache/prefetch/ghb.hh"
 
-    history_size = Param.Unsigned(256, "Number of entries tracked in the GHB")
+    history_size = Param.Unsigned(512, "Number of entries tracked in the GHB")
     pattern_length = Param.Unsigned(
-        16, "Number of historical deltas tracked for pattern matching"
+        20, "Number of historical deltas tracked for pattern matching"
     )
-    degree = Param.Unsigned(4, "Prefetch degree per miss")
+    degree = Param.Unsigned(6, "Prefetch degree per miss")
     use_pc = Param.Bool(True, "Track history per-PC when available")
     confidence_threshold = Param.Percent(
-        60, "Minimum percentage for delta correlation confidence"
+        50, "Minimum percentage for delta correlation confidence"
     )
 
 

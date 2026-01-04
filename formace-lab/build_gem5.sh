@@ -27,3 +27,4 @@ cd "$GEM5_HOME"
 
 echo "Build completed successfully!"
 
+

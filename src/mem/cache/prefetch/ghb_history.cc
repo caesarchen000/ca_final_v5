@@ -183,16 +183,15 @@ GHBHistory::updatePatternTable(const std::vector<int64_t> &chronological)
         }
     }
     
-    // Also capture reverse patterns (for irregular access patterns)
-    // This helps with patterns that go backwards
-    if (chronological.size() >= 4) {
-        for (size_t i = chronological.size() - 3; i + 2 < chronological.size() && i < chronological.size(); --i) {
-            if (i >= chronological.size()) break;  // Prevent underflow
+    // Also capture patterns with different starting points for better coverage
+    // This helps capture patterns that start at different positions
+    if (chronological.size() >= 5) {
+        // Use every other position for additional pattern coverage
+        for (size_t i = 0; i + 2 < chronological.size(); i += 2) {
             DeltaPair key{chronological[i], chronological[i + 1]};
             auto &entry = patternTable[key];
             entry.counts[chronological[i + 2]]++;
             entry.total++;
-            if (i == 0) break;
         }
     }
 }
@@ -206,30 +205,81 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
         return false;
     }
 
-    DeltaPair key{chronological[chronological.size() - 2],
-                  chronological.back()};
-    auto it = patternTable.find(key);
-    if (it == patternTable.end()) {
-        return false;
-    }
-
-    const PatternEntry &entry = it->second;
-    if (entry.total == 0) {
-        return false;
-    }
-
-    std::vector<std::pair<int64_t, uint32_t>> candidates(
-        entry.counts.begin(), entry.counts.end());
-    std::sort(candidates.begin(), candidates.end(),
-              [](const auto &a, const auto &b) { return a.second > b.second; });
-
-    // Use confidence threshold - collect multiple high-confidence predictions
+    // Use all consecutive pairs from the chronological sequence
+    // For each pair, look up in patternTable and collect predictions
     unsigned num_to_return = (max_predictions > 0) ? max_predictions : degree;
     
-    // Collect high-confidence predictions (strict threshold)
+    // Aggregate predictions from all pairs with their confidence scores
+    std::unordered_map<int64_t, std::pair<uint32_t, uint32_t>> aggregated_predictions;  // delta -> (count, total)
+    
     unsigned max_confidence = 0;
+    bool found_any_pattern = false;
+    
+    // Iterate through all consecutive pairs, weighting more recent pairs more heavily
+    // Use all pairs but weight recent ones more heavily
+    size_t start_idx = 0;  // Use all pairs for maximum coverage
+    for (size_t i = start_idx; i + 1 < chronological.size(); ++i) {
+        DeltaPair key{chronological[i], chronological[i + 1]};
+        auto it = patternTable.find(key);
+        if (it == patternTable.end()) {
+            continue;
+        }
+
+        const PatternEntry &entry = it->second;
+        if (entry.total == 0) {
+            continue;
+        }
+        
+        found_any_pattern = true;
+        
+        // Weight more recent pairs more heavily (exponential weighting)
+        // Pairs closer to the end are more relevant
+        size_t distance_from_end = chronological.size() - 1 - i;
+        // More aggressive weighting: recent pairs get 2-6x weight, but all pairs contribute
+        // Exponential weighting: very recent pairs get much higher weight
+        unsigned weight = 1;
+        if (distance_from_end < 3) {
+            weight = 8 - distance_from_end;  // Most recent 3 pairs get 5-8x weight
+        } else if (distance_from_end < 6) {
+            weight = 5 - (distance_from_end - 3);  // Next 3 pairs get 2-4x weight
+        } else if (distance_from_end < 10) {
+            weight = 2;  // Pairs 6-10 positions back get 2x weight
+        }
+        // Pairs beyond 10 positions get 1x weight (still contribute)
+        
+        // Aggregate all candidates from this pair with weighting
+        for (const auto &candidate : entry.counts) {
+            int64_t delta = candidate.first;
+            uint32_t count = candidate.second * weight;  // Apply weight to count
+            uint32_t total = entry.total * weight;       // Apply weight to total
+            
+            if (aggregated_predictions.find(delta) == aggregated_predictions.end()) {
+                aggregated_predictions[delta] = {0, 0};
+            }
+            aggregated_predictions[delta].first += count;
+            aggregated_predictions[delta].second += total;
+        }
+    }
+    
+    if (!found_any_pattern) {
+        return false;
+    }
+    
+    // Convert aggregated predictions to candidates and sort by confidence
+    std::vector<std::pair<int64_t, std::pair<uint32_t, uint32_t>>> candidates(
+        aggregated_predictions.begin(), aggregated_predictions.end());
+    
+    // Sort by confidence (count/total ratio)
+    std::sort(candidates.begin(), candidates.end(),
+              [](const auto &a, const auto &b) {
+                  double conf_a = (a.second.first * 100.0) / a.second.second;
+                  double conf_b = (b.second.first * 100.0) / b.second.second;
+                  return conf_a > conf_b;
+              });
+    
+    // Collect high-confidence predictions (strict threshold)
     for (const auto &candidate : candidates) {
-        unsigned confidence = (candidate.second * 100) / entry.total;
+        unsigned confidence = (candidate.second.first * 100) / candidate.second.second;
         if (confidence > max_confidence) {
             max_confidence = confidence;
         }
@@ -244,10 +294,18 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
     // If no high-confidence predictions but we have candidates, use top one if it's reasonable
     // This helps with early learning phase and improves coverage
     if (predicted.empty() && !candidates.empty()) {
-        unsigned top_confidence = (candidates[0].second * 100) / entry.total;
-        // Use top candidate if it has at least 25% confidence (reasonable for early learning)
-        if (top_confidence >= 25) {
+        unsigned top_confidence = (candidates[0].second.first * 100) / candidates[0].second.second;
+        // Use top candidate if it has at least 20% confidence (more aggressive for better coverage)
+        // Also use if we have multiple candidates with similar confidence
+        if (top_confidence >= 20) {
             predicted.push_back(candidates[0].first);
+            // If top confidence is reasonable, also add second candidate if it's close
+            if (candidates.size() > 1 && top_confidence >= 30) {
+                unsigned second_confidence = (candidates[1].second.first * 100) / candidates[1].second.second;
+                if (second_confidence >= 20 && second_confidence >= top_confidence - 10) {
+                    predicted.push_back(candidates[1].first);
+                }
+            }
         }
     }
     
@@ -255,7 +313,7 @@ GHBHistory::findPatternMatch(const std::vector<int64_t> &chronological,
     // This helps with complex patterns that have multiple likely next steps
     if (max_confidence > 60 && predicted.size() < num_to_return && candidates.size() > predicted.size()) {
         for (size_t i = predicted.size(); i < candidates.size() && predicted.size() < num_to_return; ++i) {
-            unsigned conf = (candidates[i].second * 100) / entry.total;
+            unsigned conf = (candidates[i].second.first * 100) / candidates[i].second.second;
             // For high-confidence patterns, also accept medium-confidence secondary predictions
             // Be more aggressive: lower threshold for secondary predictions
             unsigned secondary_threshold = max_confidence > 80 ? (confidenceThreshold - 15) : 
